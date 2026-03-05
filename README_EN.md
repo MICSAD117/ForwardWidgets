@@ -19,6 +19,10 @@ ForwardWidget is a JS component for building modules that provides rich web-rela
 
 ForwardWidget supports extending functionality through JavaScript scripts. Each Widget is an independent JavaScript file that must follow specific structure and specifications.
 
+### Scaffold
+
+Running `node scaffold/create-widget.js` with no options instantly writes a default widget template (id `forward.meta.demo`, module `loadResource`) under `widgets/` and validates the resulting `WidgetMetadata`—no prompts required. Use `--interactive` or pass options such as `--id`, `--title`, `--modules '[...]'`, and `--output widgets` when you need custom values. See `scaffold/README.md` for the full option list.
+
 ### Widget Metadata Configuration
 
 Each Widget script must start with a `WidgetMetadata` object that defines the basic information and functional modules:
@@ -331,3 +335,25 @@ The App has built-in module testing tools
 2. Check network requests and responses
 3. Verify DOM parsing results
 4. Test different parameter combinations
+
+### Module Encryption
+
+ForwardWidget supports optional encryption for JS modules. Encrypted modules are automatically decrypted on import. Unencrypted modules continue to work normally.
+
+#### Online Tool
+
+Visit the [Encryption Tool](https://forward.vvebo.vip/encrypt/) to encrypt in your browser.
+
+#### API
+
+```bash
+curl -X POST https://widgetencrypt.inchmade.ai --data-binary @widgets/tmdb.js -o widgets/tmdb.js
+```
+
+#### Claude Code
+
+When using Claude Code in this repo, use the built-in command:
+
+```
+/fw-encrypt widgets/tmdb.js
+```
