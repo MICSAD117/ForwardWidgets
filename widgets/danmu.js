@@ -20,7 +20,7 @@
 WidgetMetadata = {
   id: "forward.danmu",
   title: "自定义弹幕",
-  version: "1.0.0",
+  version: "1.0.2",
   requiredVersion: "0.0.2",
   description: "从指定服务器获取弹幕",
   author: "Forward",
@@ -96,19 +96,19 @@ async function searchDanmu(params) {
   }
 
   // 开始过滤数据
+  const movieTypes = ["movie", "电影", "奇幻片", "剧场版"];
   let animes = [];
   if (data.animes && data.animes.length > 0) {
     animes = data.animes.filter((anime) => {
-      if (
-        (anime.type === "tvseries" || anime.type === "web") &&
-        type === "tv"
-      ) {
-        return true;
-      } else if (anime.type === "movie" && type === "movie") {
-        return true;
-      } else {
-        return false;
+      const animeType = (anime.type || "").toLowerCase();
+      if (type === "movie") {
+        return movieTypes.some(t => t.toLowerCase() === animeType);
       }
+      // tv 类型兜底：只排除电影类型，其余都算剧集
+      if (type === "tv") {
+        return !movieTypes.some(t => t.toLowerCase() === animeType);
+      }
+      return true;
     });
     if (season) {
       // filter season
@@ -125,7 +125,7 @@ async function searchDanmu(params) {
             }
             // match chinese number
             let chineseNumber = seasonPart.match(/[一二三四五六七八九十壹贰叁肆伍陆柒捌玖拾]+/);
-            if (chineseNumber && convertChineseNumber(chineseNumber[0]) === season) {
+            if (chineseNumber && String(convertChineseNumber(chineseNumber[0])) === season) {
               return true;
             }
           }
