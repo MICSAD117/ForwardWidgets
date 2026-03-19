@@ -29,7 +29,13 @@ WidgetMetadata = {
           title: "描述你想看的内容",
           type: "input",
           value: "随便推荐一点",
-          description: "如「去年高分科幻片」「诺兰的电影」「类似盗梦空间」",
+          description: "用自然语言描述，AI 帮你找片",
+          placeholders: [
+            { title: "随便推荐一点", value: "随便推荐一点" },
+            { title: "去年高分科幻片", value: "去年高分科幻片" },
+            { title: "诺兰的电影", value: "诺兰的电影" },
+            { title: "类似盗梦空间", value: "类似盗梦空间" },
+          ],
         },
         {
           name: "userId",
@@ -47,7 +53,13 @@ WidgetMetadata = {
         name: "keyword",
         title: "搜索关键词",
         type: "input",
-        description: "用自然语言描述，如「去年的高分科幻片」「类似盗梦空间的电影」",
+        description: "用自然语言描述，AI 帮你找片",
+        placeholders: [
+          { title: "去年高分科幻片", value: "去年高分科幻片" },
+          { title: "诺兰的电影", value: "诺兰的电影" },
+          { title: "类似盗梦空间", value: "类似盗梦空间" },
+          { title: "最近热门美剧", value: "最近热门美剧" },
+        ],
       },
       {
         name: "userId",
