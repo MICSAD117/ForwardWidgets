@@ -14,7 +14,7 @@ WidgetMetadata = {
   title: "AI 搜索",
   version: "1.1.0",
   requiredVersion: "0.0.1",
-  description: "用自然语言描述你想看的内容，AI 理解意图后搜索匹配结果",
+  description: "用自然语言描述你想看的内容，AI 理解意图后搜索匹配结果。每日有使用次数限制，Pro 用户可享受更高额度",
   author: "Forward",
   site: "https://github.com/InchStudio/ForwardWidgets",
   modules: [

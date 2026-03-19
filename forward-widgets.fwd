@@ -38,6 +38,15 @@
       "version": "1.0.2",
       "author": "Forward",
       "url": "https://assets.vvebo.vip/scripts/danmu.js"
+    },
+    {
+      "id": "forward.nlsearch",
+      "title": "AI 搜索",
+      "description": "用自然语言描述你想看的内容，AI 理解意图后搜索匹配结果",
+      "requiredVersion": "0.0.2",
+      "version": "1.0.0",
+      "author": "Forward",
+      "url": "https://assets.vvebo.vip/scripts/nlsearch.js"
     }
   ]
 }
