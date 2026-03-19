@@ -11,71 +11,71 @@ const API_BASE = "https://fluxapi.vvebo.vip/v1/nlsearch";
 
 WidgetMetadata = {
   id: "forward.nlsearch",
-  title: "AI Search",
+  title: "AI 搜索",
   version: "1.1.0",
   requiredVersion: "0.0.1",
-  description: "Describe what you want to watch, AI finds matching results",
+  description: "用自然语言描述你想看的内容，AI 理解意图后搜索匹配结果",
   author: "Forward",
   site: "https://github.com/InchStudio/ForwardWidgets",
   modules: [
     {
       id: "aiDiscover",
-      title: "AI Discover",
+      title: "AI 发现",
       functionName: "nlSearch",
       cacheDuration: 3600,
       params: [
         {
           name: "keyword",
-          title: "Describe what you want",
+          title: "描述你想看的内容",
           type: "input",
-          value: "recommend something",
-          description: "Natural language search powered by AI",
+          value: "随便推荐一点",
+          description: "用自然语言描述，AI 帮你找片",
           placeholders: [
-            { title: "Recommend something", value: "recommend something" },
-            { title: "Top sci-fi last year", value: "top sci-fi movies from last year" },
-            { title: "Nolan's movies", value: "Christopher Nolan movies" },
-            { title: "Like Inception", value: "movies like Inception" },
+            { title: "随便推荐一点", value: "随便推荐一点" },
+            { title: "去年高分科幻片", value: "去年高分科幻片" },
+            { title: "诺兰的电影", value: "诺兰的电影" },
+            { title: "类似盗梦空间", value: "类似盗梦空间" },
           ],
         },
         {
           name: "language",
-          title: "Language",
+          title: "语言",
           type: "language",
           value: "zh-CN",
         },
         {
           name: "userId",
-          title: "User ID",
+          title: "用户 ID",
           type: "userId",
         },
       ],
     },
   ],
   search: {
-    title: "AI Search",
+    title: "AI 搜索",
     functionName: "nlSearch",
     params: [
       {
         name: "keyword",
-        title: "Search",
+        title: "搜索关键词",
         type: "input",
-        description: "Natural language search powered by AI",
+        description: "用自然语言描述，AI 帮你找片",
         placeholders: [
-          { title: "Top sci-fi last year", value: "top sci-fi movies from last year" },
-          { title: "Nolan's movies", value: "Christopher Nolan movies" },
-          { title: "Like Inception", value: "movies like Inception" },
-          { title: "Trending TV shows", value: "trending TV shows right now" },
+          { title: "去年高分科幻片", value: "去年高分科幻片" },
+          { title: "诺兰的电影", value: "诺兰的电影" },
+          { title: "类似盗梦空间", value: "类似盗梦空间" },
+          { title: "最近热门美剧", value: "最近热门美剧" },
         ],
       },
       {
         name: "language",
-        title: "Language",
+        title: "语言",
         type: "language",
         value: "zh-CN",
       },
       {
         name: "userId",
-        title: "User ID",
+        title: "用户 ID",
         type: "userId",
       },
     ],
@@ -84,9 +84,9 @@ WidgetMetadata = {
 
 async function nlSearch(params = {}) {
   const keyword = (params.keyword || params.query || "").trim();
-  if (!keyword) throw new Error("Please enter a search description");
+  if (!keyword) throw new Error("请输入搜索描述");
 
-  const language = params.language || "en-US";
+  const language = params.language || "zh-CN";
 
   try {
     const response = await Widget.http.post(
@@ -98,12 +98,12 @@ async function nlSearch(params = {}) {
     const data = response.data;
 
     if (!data || !data.success) {
-      throw new Error((data && data.message) || "Search failed");
+      throw new Error((data && data.message) || "搜索失败");
     }
 
     return data.data || [];
   } catch (error) {
-    console.error("[AI Search] Request failed:", error.message || error);
-    throw new Error("AI search service is temporarily unavailable, please try again later");
+    console.error("[AI搜索] 请求失败:", error.message || error);
+    throw new Error("AI 搜索服务暂时不可用，请稍后再试");
   }
 }
