@@ -107,18 +107,41 @@ async function main() {
     libs.createWidgetExecutor ||
     null;
 
-  if (!createRunner) {
+  // 尝试构建执行器，兼容可能的参数名
+  let runner;
+  if (createRunner) {
+    try {
+      runner = await createRunner({ widgetFile, file: widgetFile, entry: widgetFile });
+    } catch {
+      runner = await createRunner(widgetFile);
+    }
+  }
+
+  // 兼容只导出 WidgetAdaptor 的版本
+  const WidgetAdaptor = libs.WidgetAdaptor || libs.WidgetAdapter || null;
+  if (!runner && WidgetAdaptor) {
+    const adaptorCtorParams = [
+      { widgetFile, file: widgetFile, entry: widgetFile },
+      { widgetFile },
+      { file: widgetFile },
+      { entry: widgetFile },
+      widgetFile,
+      undefined,
+    ];
+    for (const param of adaptorCtorParams) {
+      try {
+        runner = typeof param === 'undefined' ? new WidgetAdaptor() : new WidgetAdaptor(param);
+        if (runner) break;
+      } catch {
+        // 忽略，尝试下一种构造参数
+      }
+    }
+  }
+
+  if (!runner) {
     console.error('\n无法识别 @forward-widget/libs 的 runner 创建 API。');
     console.error('请检查导出并按当前版本调整：', availableExports);
     process.exit(2);
-  }
-
-  // 尝试构建执行器，兼容可能的参数名
-  let runner;
-  try {
-    runner = await createRunner({ widgetFile, file: widgetFile, entry: widgetFile });
-  } catch {
-    runner = await createRunner(widgetFile);
   }
 
   if (!runner) {
@@ -127,34 +150,43 @@ async function main() {
   }
 
   // 兼容不同 runner 调用方式
-  const runMethod = runner.run || runner.invoke || runner.callModule || null;
+  const runMethod =
+    runner.run ||
+    runner.invoke ||
+    runner.callModule ||
+    runner.execute ||
+    runner.call ||
+    runner.runFunction ||
+    null;
   if (!runMethod) {
-    console.error('runner 缺少可调用方法（run/invoke/callModule）。');
-    process.exit(4);
+    if (typeof runner.search !== 'function' || typeof runner.loadPage !== 'function' || typeof runner.loadDetail !== 'function') {
+      console.error('runner 缺少可调用方法（run/invoke/callModule/execute/call/runFunction）。');
+      process.exit(4);
+    }
   }
 
+  const invokeRunner = async (functionName, params) => {
+    if (runMethod) {
+      return runMethod.call(runner, {
+        functionName,
+        name: functionName,
+        module: functionName,
+        params,
+        link: functionName === 'loadDetail' ? params : undefined,
+      }).catch(async () => {
+        return runMethod.call(runner, functionName, params);
+      });
+    }
+    return runner[functionName](params);
+  };
+
   // 1) search
-  const searchResult = await runMethod.call(runner, {
-    functionName: 'search',
-    name: 'search',
-    module: 'search',
-    params: { keyword, from },
-  }).catch(async () => {
-    // 兜底参数结构
-    return runMethod.call(runner, 'search', { keyword, from });
-  });
+  const searchResult = await invokeRunner('search', { keyword, from });
   printResult('search()', searchResult);
 
   // 2) loadPage（热门）
   const hotUrl = 'https://jable.tv/hot/?mode=async&function=get_block&block_id=list_videos_common_videos_list';
-  const pageResult = await runMethod.call(runner, {
-    functionName: 'loadPage',
-    name: 'loadPage',
-    module: 'loadPage',
-    params: { url: hotUrl, from },
-  }).catch(async () => {
-    return runMethod.call(runner, 'loadPage', { url: hotUrl, from });
-  });
+  const pageResult = await invokeRunner('loadPage', { url: hotUrl, from });
   printResult('loadPage()', pageResult);
 
   // 3) loadDetail
@@ -164,15 +196,7 @@ async function main() {
     return;
   }
 
-  const detailResult = await runMethod.call(runner, {
-    functionName: 'loadDetail',
-    name: 'loadDetail',
-    module: 'loadDetail',
-    params: detailLink,
-    link: detailLink,
-  }).catch(async () => {
-    return runMethod.call(runner, 'loadDetail', detailLink);
-  });
+  const detailResult = await invokeRunner('loadDetail', detailLink);
   printResult('loadDetail()', detailResult);
 }
 
