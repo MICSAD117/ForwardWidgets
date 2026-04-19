@@ -11,7 +11,8 @@
  */
 
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import fs from 'node:fs';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -35,19 +36,68 @@ function pickFirstLink(items) {
   return items.find((x) => x && typeof x.link === 'string' && x.link.startsWith('http'))?.link || '';
 }
 
+async function importLibs() {
+  const attempts = [];
+  const candidates = [
+    '@forward-widget/libs',
+    '@forward-widget/libs/node',
+    '@forward-widget/libs/runner',
+    '@forward-widget/libs/index',
+    '@forward-widget/libs/index.js',
+  ];
+
+  for (const specifier of candidates) {
+    try {
+      const loaded = await import(specifier);
+      return { libs: loaded, specifier };
+    } catch (error) {
+      attempts.push(`${specifier}: ${error?.message || error}`);
+    }
+  }
+
+  // 某些版本可能未在 exports 暴露根入口，回退到读取 package.json 后按文件路径加载。
+  const pkgPath = path.join(process.cwd(), 'node_modules', '@forward-widget', 'libs', 'package.json');
+  if (fs.existsSync(pkgPath)) {
+    const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
+    const exportsField = pkg?.exports && typeof pkg.exports === 'object' ? pkg.exports : {};
+    const exportKeys = Object.keys(exportsField);
+    const preferredExport = exportKeys.find((key) => key === '.' || key === './node' || key === './runner') || exportKeys[0];
+    const target = preferredExport ? exportsField[preferredExport] : null;
+    const targetPath = typeof target === 'string' ? target : target?.import || target?.default || null;
+
+    if (targetPath) {
+      const absoluteFile = path.resolve(path.dirname(pkgPath), targetPath);
+      if (fs.existsSync(absoluteFile)) {
+        try {
+          const loaded = await import(pathToFileURL(absoluteFile).href);
+          return { libs: loaded, specifier: absoluteFile };
+        } catch (error) {
+          attempts.push(`${absoluteFile}: ${error?.message || error}`);
+        }
+      }
+    }
+  }
+
+  throw new Error(attempts.join('\n'));
+}
+
 async function main() {
   let libs;
+  let usedSpecifier = '';
   try {
-    libs = await import('@forward-widget/libs');
+    const imported = await importLibs();
+    libs = imported.libs;
+    usedSpecifier = imported.specifier;
   } catch (error) {
     console.error('未找到 @forward-widget/libs，请先安装后再运行：');
     console.error('  npm i -D @forward-widget/libs');
+    console.error('如仍失败，尝试：npm i -D @forward-widget/libs@latest');
     console.error('\n原始错误：', error?.message || error);
     process.exit(1);
   }
 
   const availableExports = Object.keys(libs).sort();
-  console.log('已加载 @forward-widget/libs，可用导出：', availableExports.join(', '));
+  console.log(`已加载 @forward-widget/libs（入口：${usedSpecifier}），可用导出：`, availableExports.join(', '));
 
   // 兼容不同版本 API：优先尝试常见 runner 创建函数
   const createRunner =
