@@ -11,7 +11,8 @@
  */
 
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import fs from 'node:fs';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -35,19 +36,68 @@ function pickFirstLink(items) {
   return items.find((x) => x && typeof x.link === 'string' && x.link.startsWith('http'))?.link || '';
 }
 
+async function importLibs() {
+  const attempts = [];
+  const candidates = [
+    '@forward-widget/libs',
+    '@forward-widget/libs/node',
+    '@forward-widget/libs/runner',
+    '@forward-widget/libs/index',
+    '@forward-widget/libs/index.js',
+  ];
+
+  for (const specifier of candidates) {
+    try {
+      const loaded = await import(specifier);
+      return { libs: loaded, specifier };
+    } catch (error) {
+      attempts.push(`${specifier}: ${error?.message || error}`);
+    }
+  }
+
+  // 某些版本可能未在 exports 暴露根入口，回退到读取 package.json 后按文件路径加载。
+  const pkgPath = path.join(process.cwd(), 'node_modules', '@forward-widget', 'libs', 'package.json');
+  if (fs.existsSync(pkgPath)) {
+    const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
+    const exportsField = pkg?.exports && typeof pkg.exports === 'object' ? pkg.exports : {};
+    const exportKeys = Object.keys(exportsField);
+    const preferredExport = exportKeys.find((key) => key === '.' || key === './node' || key === './runner') || exportKeys[0];
+    const target = preferredExport ? exportsField[preferredExport] : null;
+    const targetPath = typeof target === 'string' ? target : target?.import || target?.default || null;
+
+    if (targetPath) {
+      const absoluteFile = path.resolve(path.dirname(pkgPath), targetPath);
+      if (fs.existsSync(absoluteFile)) {
+        try {
+          const loaded = await import(pathToFileURL(absoluteFile).href);
+          return { libs: loaded, specifier: absoluteFile };
+        } catch (error) {
+          attempts.push(`${absoluteFile}: ${error?.message || error}`);
+        }
+      }
+    }
+  }
+
+  throw new Error(attempts.join('\n'));
+}
+
 async function main() {
   let libs;
+  let usedSpecifier = '';
   try {
-    libs = await import('@forward-widget/libs');
+    const imported = await importLibs();
+    libs = imported.libs;
+    usedSpecifier = imported.specifier;
   } catch (error) {
     console.error('未找到 @forward-widget/libs，请先安装后再运行：');
     console.error('  npm i -D @forward-widget/libs');
+    console.error('如仍失败，尝试：npm i -D @forward-widget/libs@latest');
     console.error('\n原始错误：', error?.message || error);
     process.exit(1);
   }
 
   const availableExports = Object.keys(libs).sort();
-  console.log('已加载 @forward-widget/libs，可用导出：', availableExports.join(', '));
+  console.log(`已加载 @forward-widget/libs（入口：${usedSpecifier}），可用导出：`, availableExports.join(', '));
 
   // 兼容不同版本 API：优先尝试常见 runner 创建函数
   const createRunner =
@@ -57,18 +107,41 @@ async function main() {
     libs.createWidgetExecutor ||
     null;
 
-  if (!createRunner) {
+  // 尝试构建执行器，兼容可能的参数名
+  let runner;
+  if (createRunner) {
+    try {
+      runner = await createRunner({ widgetFile, file: widgetFile, entry: widgetFile });
+    } catch {
+      runner = await createRunner(widgetFile);
+    }
+  }
+
+  // 兼容只导出 WidgetAdaptor 的版本
+  const WidgetAdaptor = libs.WidgetAdaptor || libs.WidgetAdapter || null;
+  if (!runner && WidgetAdaptor) {
+    const adaptorCtorParams = [
+      { widgetFile, file: widgetFile, entry: widgetFile },
+      { widgetFile },
+      { file: widgetFile },
+      { entry: widgetFile },
+      widgetFile,
+      undefined,
+    ];
+    for (const param of adaptorCtorParams) {
+      try {
+        runner = typeof param === 'undefined' ? new WidgetAdaptor() : new WidgetAdaptor(param);
+        if (runner) break;
+      } catch {
+        // 忽略，尝试下一种构造参数
+      }
+    }
+  }
+
+  if (!runner) {
     console.error('\n无法识别 @forward-widget/libs 的 runner 创建 API。');
     console.error('请检查导出并按当前版本调整：', availableExports);
     process.exit(2);
-  }
-
-  // 尝试构建执行器，兼容可能的参数名
-  let runner;
-  try {
-    runner = await createRunner({ widgetFile, file: widgetFile, entry: widgetFile });
-  } catch {
-    runner = await createRunner(widgetFile);
   }
 
   if (!runner) {
@@ -77,34 +150,43 @@ async function main() {
   }
 
   // 兼容不同 runner 调用方式
-  const runMethod = runner.run || runner.invoke || runner.callModule || null;
+  const runMethod =
+    runner.run ||
+    runner.invoke ||
+    runner.callModule ||
+    runner.execute ||
+    runner.call ||
+    runner.runFunction ||
+    null;
   if (!runMethod) {
-    console.error('runner 缺少可调用方法（run/invoke/callModule）。');
-    process.exit(4);
+    if (typeof runner.search !== 'function' || typeof runner.loadPage !== 'function' || typeof runner.loadDetail !== 'function') {
+      console.error('runner 缺少可调用方法（run/invoke/callModule/execute/call/runFunction）。');
+      process.exit(4);
+    }
   }
 
+  const invokeRunner = async (functionName, params) => {
+    if (runMethod) {
+      return runMethod.call(runner, {
+        functionName,
+        name: functionName,
+        module: functionName,
+        params,
+        link: functionName === 'loadDetail' ? params : undefined,
+      }).catch(async () => {
+        return runMethod.call(runner, functionName, params);
+      });
+    }
+    return runner[functionName](params);
+  };
+
   // 1) search
-  const searchResult = await runMethod.call(runner, {
-    functionName: 'search',
-    name: 'search',
-    module: 'search',
-    params: { keyword, from },
-  }).catch(async () => {
-    // 兜底参数结构
-    return runMethod.call(runner, 'search', { keyword, from });
-  });
+  const searchResult = await invokeRunner('search', { keyword, from });
   printResult('search()', searchResult);
 
   // 2) loadPage（热门）
   const hotUrl = 'https://jable.tv/hot/?mode=async&function=get_block&block_id=list_videos_common_videos_list';
-  const pageResult = await runMethod.call(runner, {
-    functionName: 'loadPage',
-    name: 'loadPage',
-    module: 'loadPage',
-    params: { url: hotUrl, from },
-  }).catch(async () => {
-    return runMethod.call(runner, 'loadPage', { url: hotUrl, from });
-  });
+  const pageResult = await invokeRunner('loadPage', { url: hotUrl, from });
   printResult('loadPage()', pageResult);
 
   // 3) loadDetail
@@ -114,15 +196,7 @@ async function main() {
     return;
   }
 
-  const detailResult = await runMethod.call(runner, {
-    functionName: 'loadDetail',
-    name: 'loadDetail',
-    module: 'loadDetail',
-    params: detailLink,
-    link: detailLink,
-  }).catch(async () => {
-    return runMethod.call(runner, 'loadDetail', detailLink);
-  });
+  const detailResult = await invokeRunner('loadDetail', detailLink);
   printResult('loadDetail()', detailResult);
 }
 
