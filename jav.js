@@ -193,32 +193,26 @@ function parseDmmDurationFromText(text) {
 
 const dmmMetadataCache = {};
 
-async function resolveDmmMetadata(keyword, fallback = {}) {
-  const fallbackData = {
-    title: fallback.title || "",
-    posterPath: fallback.posterPath || "",
-    backdropPath: fallback.backdropPath || fallback.posterPath || "",
-    releaseDate: fallback.releaseDate || "",
-    rating: fallback.rating || "",
-    genreTitle: fallback.genreTitle || "",
-    duration: fallback.duration || 0,
-    durationText: fallback.durationText || "",
-    previewUrl: fallback.previewUrl || "",
-    description: fallback.description || "",
+async function resolveDmmMetadata(keyword) {
+  const emptyData = {
+    title: "",
+    posterPath: "",
+    backdropPath: "",
+    releaseDate: "",
+    rating: "",
+    genreTitle: "",
+    duration: 0,
+    durationText: "",
+    previewUrl: "",
+    description: "",
   };
-
   const query = (keyword || "").trim();
   if (!query) {
-    return fallbackData;
+    return emptyData;
   }
 
   if (dmmMetadataCache[query]) {
-    return {
-      ...fallbackData,
-      ...dmmMetadataCache[query],
-      posterPath: dmmMetadataCache[query].posterPath || fallbackData.posterPath,
-      backdropPath: dmmMetadataCache[query].backdropPath || fallbackData.backdropPath,
-    };
+    return dmmMetadataCache[query];
   }
 
   try {
@@ -232,7 +226,7 @@ async function resolveDmmMetadata(keyword, fallback = {}) {
 
     const html = response?.data;
     if (!html || typeof html !== "string") {
-      return fallbackData;
+      return emptyData;
     }
 
     const $ = Widget.html.load(html);
@@ -247,10 +241,10 @@ async function resolveDmmMetadata(keyword, fallback = {}) {
       "";
 
     const metadata = {
-      ...fallbackData,
-      posterPath: normalizeToAbsoluteUrl(poster, "https://video.dmm.co.jp") || fallbackData.posterPath,
-      backdropPath: normalizeToAbsoluteUrl(poster, "https://video.dmm.co.jp") || fallbackData.backdropPath,
-      title: firstResult.find(".txt").first().text().trim() || fallbackData.title,
+      ...emptyData,
+      posterPath: normalizeToAbsoluteUrl(poster, "https://video.dmm.co.jp"),
+      backdropPath: normalizeToAbsoluteUrl(poster, "https://video.dmm.co.jp"),
+      title: firstResult.find(".txt").first().text().trim(),
     };
 
     if (detailLink && detailLink.includes("video.dmm.co.jp")) {
@@ -306,7 +300,7 @@ async function resolveDmmMetadata(keyword, fallback = {}) {
     dmmMetadataCache[query] = metadata;
     return metadata;
   } catch (error) {
-    return fallbackData;
+    return emptyData;
   }
 }
 
@@ -452,21 +446,15 @@ async function loadDetail(link) {
     throw new Error("无法获取有效的播放地址，可能需要代理验证");
   }
 
-  const ogImage = $("meta[property='og:image']").attr("content") || "";
-  const dmmMeta = await resolveDmmMetadata($("meta[property='og:title']").attr("content") || pageTitle, {
-    title: $("meta[property='og:title']").attr("content") || pageTitle,
-    posterPath: ogImage,
-    backdropPath: ogImage,
-    description: $("meta[property='og:description']").attr("content") || "",
-  });
+  const dmmMeta = await resolveDmmMetadata($("meta[property='og:title']").attr("content") || pageTitle);
 
   return {
     id: link,
     type: "url",
-    title: dmmMeta.title || $("meta[property='og:title']").attr("content") || pageTitle,
+    title: dmmMeta.title || "",
     num,
-    posterPath: dmmMeta.posterPath || ogImage,
-    backdropPath: dmmMeta.backdropPath || ogImage,
+    posterPath: dmmMeta.posterPath || "",
+    backdropPath: dmmMeta.backdropPath || "",
     releaseDate: dmmMeta.releaseDate || "",
     mediaType: "movie",
     rating: dmmMeta.rating || "",
@@ -477,7 +465,7 @@ async function loadDetail(link) {
     videoUrl: hlsUrl,
     link,
     episode: 0,
-    description: dmmMeta.description || $("meta[property='og:description']").attr("content") || "",
+    description: dmmMeta.description || "",
     playerType: "ijk",
     childItems: [],
     customHeaders: {
