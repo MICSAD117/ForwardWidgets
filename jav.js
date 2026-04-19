@@ -12,7 +12,6 @@ WidgetMetadata = {
   requiredVersion: "0.0.2",
   detailCacheDuration: 60,
   modules: [
-    // 搜索模块
     {
       title: "搜索",
       description: "按番号或关键词搜索",
@@ -41,7 +40,6 @@ WidgetMetadata = {
         { name: "from", title: "页码", type: "page", description: "页码", value: "1" },
       ],
     },
-    // 热门模块
     {
       title: "热门",
       description: "热门影片",
@@ -71,7 +69,6 @@ WidgetMetadata = {
         { name: "from", title: "页码", type: "page", description: "页码", value: "1" },
       ],
     },
-    // 最新模块
     {
       title: "最新",
       description: "最新上映影片",
@@ -100,7 +97,6 @@ WidgetMetadata = {
         { name: "from", title: "页码", type: "page", description: "页码", value: "1" },
       ],
     },
-    // 中文模块
     {
       title: "中文",
       description: "中文字幕影片",
@@ -132,54 +128,200 @@ WidgetMetadata = {
   ],
 };
 
-
-/**
- * 从标题中提取番号
- * 支持格式：SSIS-001, MIDE-123, IPX-001, 300MIUM-001 等
- * 也支持纯数字如 001（从标题开头提取）
- */
 function extractNum(title) {
   if (!title) return "";
-  
-  // 常见番号格式：字母-数字，如 SSIS-001, MIDE-123, IPX-001
   const pattern1 = /\b([A-Z]+\d*-\d+)\b/i;
   const match1 = title.match(pattern1);
   if (match1) return match1[1].toUpperCase();
-  
-  // 复合格式：如 300MIUM-001
+
   const pattern2 = /\b(\d+[A-Z]+\d*-\d+)\b/i;
   const match2 = title.match(pattern2);
   if (match2) return match2[1].toUpperCase();
-  
-  // 纯数字格式：如 001, 123
+
   const pattern3 = /\b(\d{3,})\b/;
   const match3 = title.match(pattern3);
   if (match3) return match3[1];
-  
+
   return "";
 }
 
+function parseDuration(durationText) {
+  if (!durationText) {
+    return { duration: 0, durationText: "" };
+  }
+  const normalized = durationText.trim();
+  const parts = normalized.split(":").map((p) => Number.parseInt(p, 10));
+  if (parts.some(Number.isNaN)) {
+    return { duration: 0, durationText: normalized };
+  }
+  let duration = 0;
+  if (parts.length === 3) {
+    duration = parts[0] * 3600 + parts[1] * 60 + parts[2];
+  } else if (parts.length === 2) {
+    duration = parts[0] * 60 + parts[1];
+  } else if (parts.length === 1) {
+    duration = parts[0];
+  }
+  return { duration, durationText: normalized };
+}
+
+function normalizeToAbsoluteUrl(url, base) {
+  if (!url) return "";
+  if (url.startsWith("http://") || url.startsWith("https://")) return url;
+  if (url.startsWith("//")) return `https:${url}`;
+  if (url.startsWith("/")) return `${base}${url}`;
+  return `${base}/${url}`;
+}
+
+function parseDmmDate(text) {
+  if (!text) return "";
+  const normalized = text.replace(/\s+/g, " ").trim();
+  const match = normalized.match(/(\d{4}[\/.-]\d{1,2}[\/.-]\d{1,2})/);
+  if (!match) return "";
+  return match[1].replace(/[/.]/g, "-");
+}
+
+function parseDmmDurationFromText(text) {
+  if (!text) return { duration: 0, durationText: "" };
+  const normalized = text.replace(/\s+/g, " ").trim();
+  const match = normalized.match(/(\d+)\s*分/);
+  if (!match) return { duration: 0, durationText: "" };
+  const minutes = Number.parseInt(match[1], 10);
+  if (Number.isNaN(minutes)) return { duration: 0, durationText: "" };
+  return { duration: minutes * 60, durationText: `${minutes}:00` };
+}
+
+const dmmMetadataCache = {};
+
+async function resolveDmmMetadata(keyword) {
+  const emptyData = {
+    title: "",
+    posterPath: "",
+    backdropPath: "",
+    releaseDate: "",
+    rating: "",
+    genreTitle: "",
+    duration: 0,
+    durationText: "",
+    previewUrl: "",
+    description: "",
+  };
+  const query = (keyword || "").trim();
+  if (!query) {
+    return emptyData;
+  }
+
+  if (dmmMetadataCache[query]) {
+    return dmmMetadataCache[query];
+  }
+
+  try {
+    const searchUrl = `https://video.dmm.co.jp/av/-/list/search/=/?searchstr=${encodeURIComponent(query)}`;
+    const response = await Widget.http.get(searchUrl, {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+        Referer: "https://video.dmm.co.jp/av/",
+      },
+    });
+
+    const html = response?.data;
+    if (!html || typeof html !== "string") {
+      return emptyData;
+    }
+
+    const $ = Widget.html.load(html);
+    const firstResult = $(".dcd-main-result .dcd-box").first();
+    const detailLinkRaw = firstResult.find("a").first().attr("href") || "";
+    const detailLink = normalizeToAbsoluteUrl(detailLinkRaw, "https://video.dmm.co.jp");
+    const poster =
+      firstResult.find("img").first().attr("data-src") ||
+      firstResult.find("img").first().attr("src") ||
+      $("img").first().attr("data-src") ||
+      $("img").first().attr("src") ||
+      "";
+
+    const metadata = {
+      ...emptyData,
+      posterPath: normalizeToAbsoluteUrl(poster, "https://video.dmm.co.jp"),
+      backdropPath: normalizeToAbsoluteUrl(poster, "https://video.dmm.co.jp"),
+      title: firstResult.find(".txt").first().text().trim(),
+    };
+
+    if (detailLink && detailLink.includes("video.dmm.co.jp")) {
+      try {
+        const detailResponse = await Widget.http.get(detailLink, {
+          headers: {
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+            Referer: "https://video.dmm.co.jp/av/",
+          },
+        });
+        const detailHtml = detailResponse?.data;
+        if (detailHtml && typeof detailHtml === "string") {
+          const $detail = Widget.html.load(detailHtml);
+          const detailPoster =
+            $detail("meta[property='og:image']").attr("content") ||
+            $detail(".dcd-video-main img").first().attr("src") ||
+            "";
+          const detailDescription =
+            $detail("meta[property='og:description']").attr("content") ||
+            $detail(".mg-b20").first().text().trim() ||
+            "";
+          const detailTitle =
+            $detail("meta[property='og:title']").attr("content") ||
+            $detail("title").text().trim() ||
+            metadata.title;
+          const wholeText = $detail("body").text();
+          const releaseDate = parseDmmDate(wholeText);
+          const durationMeta = parseDmmDurationFromText(wholeText);
+
+          metadata.posterPath =
+            normalizeToAbsoluteUrl(detailPoster, "https://video.dmm.co.jp") || metadata.posterPath;
+          metadata.backdropPath =
+            normalizeToAbsoluteUrl(detailPoster, "https://video.dmm.co.jp") || metadata.backdropPath;
+          metadata.description = detailDescription || metadata.description;
+          metadata.title = detailTitle || metadata.title;
+          metadata.releaseDate = releaseDate || metadata.releaseDate;
+          metadata.duration = durationMeta.duration || metadata.duration;
+          metadata.durationText = durationMeta.durationText || metadata.durationText;
+          metadata.genreTitle =
+            $detail(".c-tag-list a").first().text().trim() ||
+            $detail("a[href*='/av/-/list/=/article=keyword/id=']").first().text().trim() ||
+            metadata.genreTitle;
+          metadata.previewUrl =
+            $detail("source").first().attr("src") ||
+            $detail("video").first().attr("src") ||
+            metadata.previewUrl;
+        }
+      } catch (error) {
+        // ignore detail parse errors, keep search-page fallback
+      }
+    }
+
+    dmmMetadataCache[query] = metadata;
+    return metadata;
+  } catch (error) {
+    return emptyData;
+  }
+}
 
 async function search(params = {}) {
   const keyword = encodeURIComponent(params.keyword || "");
-  
   let url = `https://jable.tv/search/${keyword}/?mode=async&function=get_block&block_id=list_videos_videos_list_search_result&q=${keyword}`;
-  
+
   if (params.sort_by) {
     url += `&sort_by=${params.sort_by}`;
   }
-  
+
   if (params.from) {
     url += `&from=${params.from}`;
   }
-  
+
   return await loadPage({ ...params, url });
 }
 
 async function loadPage(params = {}) {
   const sections = await loadPageSections(params);
-  const items = sections.flatMap((section) => section.childItems);
-  return items;
+  return sections.flatMap((section) => section.childItems || []);
 }
 
 async function loadPageSections(params = {}) {
@@ -188,18 +330,16 @@ async function loadPageSections(params = {}) {
     if (!url) {
       throw new Error("地址不能为空");
     }
-    if (params["sort_by"]) {
+    if (params.sort_by) {
       url += `&sort_by=${params.sort_by}`;
     }
-    if (params["from"]) {
+    if (params.from) {
       url += `&from=${params.from}`;
     }
     const response = await Widget.http.get(url, {
       headers: {
-        "User-Agent":
-          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
-        Accept:
-          "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+        Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
       },
     });
 
@@ -207,7 +347,7 @@ async function loadPageSections(params = {}) {
       throw new Error("无法获取有效的HTML内容");
     }
 
-    return parseHtml(response.data);
+    return await parseHtml(response.data);
   } catch (error) {
     console.error("加载页面出错:", error.message);
     throw error;
@@ -221,111 +361,83 @@ async function parseHtml(htmlContent) {
   const coverSelector = "img";
   const durationSelector = ".absolute-bottom-right .label";
   const titleSelector = ".title a";
+  const genreSelector = ".label-tag";
 
-  let sections = [];
+  const sections = [];
   const sectionElements = $(sectionSelector).toArray();
-  
+
   for (const sectionElement of sectionElements) {
     const $sectionElement = $(sectionElement);
-    var items = [];
-    const sectionTitle = $sectionElement.find(".title-box .h3-md").first();
-    const sectionTitleText = sectionTitle.text();
+    const items = [];
+    const sectionTitleText = $sectionElement.find(".title-box .h3-md").first().text().trim();
     const itemElements = $sectionElement.find(itemSelector).toArray();
-    
-    if (itemElements && itemElements.length > 0) {
-      for (const itemElement of itemElements) {
-        const $itemElement = $(itemElement);
-        const titleId = $itemElement.find(titleSelector).first();
-        const url = titleId.attr("href") || "";
-        
-        if (url && url.includes("jable.tv")) {
-          const durationId = $itemElement.find(durationSelector).first();
-          const coverId = $itemElement.find(coverSelector).first();
-          const cover = coverId.attr("data-src");
-          const video = coverId.attr("data-preview");
-          const title = titleId.text();
-          const duration = durationId.text().trim();
-          
-          // 提取番号，用于关联外部资源库
-          const num = extractNum(title);
-          
-          const item = {
-            id: num,
-            type: "url",
-            title: title,
-            num: num,                    // 番号，关联键
-			posterPath: 
-            backdropPath: cover,
-            previewUrl: video,
-            link: url,
-            mediaType: "movie",
-            description: "",
-            releaseDate: duration,
-            playerType: "system"
-          };
-          items.push(item);
-        }
+
+    for (const itemElement of itemElements) {
+      const $itemElement = $(itemElement);
+      const titleId = $itemElement.find(titleSelector).first();
+      const url = titleId.attr("href") || "";
+
+      if (!url || !url.includes("jable.tv")) {
+        continue;
       }
+
+      const durationTextRaw = $itemElement.find(durationSelector).first().text().trim();
+      const { duration, durationText } = parseDuration(durationTextRaw);
+      const coverId = $itemElement.find(coverSelector).first();
+      const cover = coverId.attr("data-src") || coverId.attr("src") || "";
+      const previewVideo = coverId.attr("data-preview") || "";
+      const title = titleId.text().trim();
+      const num = extractNum(title);
+      const genreTitle = $itemElement.find(genreSelector).first().text().trim();
+      const item = {
+        id: url,
+        type: "url",
+        title,
+        num,
+        posterPath: cover,
+        backdropPath: cover,
+        releaseDate: "",
+        mediaType: "movie",
+        rating: "",
+        genreTitle: genreTitle || sectionTitleText || "",
+        duration,
+        durationText,
+        previewUrl: previewVideo,
+        videoUrl: "",
+        link: url,
+        episode: 0,
+        description: "",
+        playerType: "system",
+        childItems: [],
+      };
+      items.push(item);
     }
-    
+
     if (items.length > 0) {
       sections.push({
         title: sectionTitleText,
-        childItems: items
+        childItems: items,
       });
     }
   }
-  
+
   return sections;
 }
 
-
-/**
- * 关联函数：加载详情页，提取视频资源
- * 
- * 关联模式：
- * 1. 列表返回 item.num（番号）
- * 2. loadDetail 可用 num 匹配外部资源库
- * 3. 外部资源库匹配失败时，回退到 Jable 原生解析
- * 
- * 要关联外部资源库，在下方添加你的资源库查询逻辑：
- * - 用 num（番号）作为查询键
- * - 返回包含 videoUrl 的对象
- */
 async function loadDetail(link) {
   const response = await Widget.http.get(link, {
     headers: {
       "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
-      "Referer": "https://jable.tv/"
+      Referer: "https://jable.tv/",
     },
   });
-  
-  // 从页面提取番号（标题中）
-  const $ = Widget.html.load(response.data);
+
+  const $ = Widget.html.load(response.data || "");
   const pageTitle = $("title").text() || "";
   const num = extractNum(pageTitle);
-  
-  // ========== 资源库关联区域 ==========
-  // 在这里添加外部资源库查询逻辑
-  // 用 num（番号）查询，例如：
-  // if (num) {
-  //   const resourceUrl = `https://你的资源库.com/api?num=${num}`;
-  //   const res = await Widget.http.get(resourceUrl);
-  //   if (res.data && res.data.videoUrl) {
-  //     return {
-  //       id: link,
-  //       type: "detail",
-  //       videoUrl: res.data.videoUrl,
-  //       num: num,
-  //       playerType: "ijk"
-  //     };
-  //   }
-  // }
-  // =====================================
-  
-  // 回退到 Jable 原生解析
+
   let hlsUrl = "";
-  const match = response.data.match(/var\s+hlsUrl\s*=\s*['"](.*?)['"]/i);
+  const match = (response.data || "").match(/var\s+hlsUrl\s*=\s*['\"](.*?)['\"]/i);
   if (match && match[1]) {
     hlsUrl = match[1];
   }
@@ -333,17 +445,33 @@ async function loadDetail(link) {
   if (!hlsUrl) {
     throw new Error("无法获取有效的播放地址，可能需要代理验证");
   }
-  
+
+  const dmmMeta = await resolveDmmMetadata($("meta[property='og:title']").attr("content") || pageTitle);
+
   return {
     id: link,
-    type: "detail",
+    type: "url",
+    title: dmmMeta.title || "",
+    num,
+    posterPath: dmmMeta.posterPath || "",
+    backdropPath: dmmMeta.backdropPath || "",
+    releaseDate: dmmMeta.releaseDate || "",
+    mediaType: "movie",
+    rating: dmmMeta.rating || "",
+    genreTitle: dmmMeta.genreTitle || "",
+    duration: dmmMeta.duration || 0,
+    durationText: dmmMeta.durationText || "",
+    previewUrl: dmmMeta.previewUrl || "",
     videoUrl: hlsUrl,
-    num: num,
-    playerType: "ijk", 
+    link,
+    episode: 0,
+    description: dmmMeta.description || "",
+    playerType: "ijk",
+    childItems: [],
     customHeaders: {
       "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
-      "Referer": link,
-      "Origin": "https://jable.tv"
-    }
+      Referer: link,
+      Origin: "https://jable.tv",
+    },
   };
 }
