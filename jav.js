@@ -193,7 +193,7 @@ function parseDmmDurationFromText(text) {
 
 const dmmMetadataCache = {};
 
-async function resolveDmmMetadata(num, fallback = {}) {
+async function resolveDmmMetadata(keyword, fallback = {}) {
   const fallbackData = {
     title: fallback.title || "",
     posterPath: fallback.posterPath || "",
@@ -207,21 +207,22 @@ async function resolveDmmMetadata(num, fallback = {}) {
     description: fallback.description || "",
   };
 
-  if (!num) {
+  const query = (keyword || "").trim();
+  if (!query) {
     return fallbackData;
   }
 
-  if (dmmMetadataCache[num]) {
+  if (dmmMetadataCache[query]) {
     return {
       ...fallbackData,
-      ...dmmMetadataCache[num],
-      posterPath: dmmMetadataCache[num].posterPath || fallbackData.posterPath,
-      backdropPath: dmmMetadataCache[num].backdropPath || fallbackData.backdropPath,
+      ...dmmMetadataCache[query],
+      posterPath: dmmMetadataCache[query].posterPath || fallbackData.posterPath,
+      backdropPath: dmmMetadataCache[query].backdropPath || fallbackData.backdropPath,
     };
   }
 
   try {
-    const searchUrl = `https://video.dmm.co.jp/av/-/list/search/=/?searchstr=${encodeURIComponent(num)}`;
+    const searchUrl = `https://video.dmm.co.jp/av/-/list/search/=/?searchstr=${encodeURIComponent(query)}`;
     const response = await Widget.http.get(searchUrl, {
       headers: {
         "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
@@ -302,7 +303,7 @@ async function resolveDmmMetadata(num, fallback = {}) {
       }
     }
 
-    dmmMetadataCache[num] = metadata;
+    dmmMetadataCache[query] = metadata;
     return metadata;
   } catch (error) {
     return fallbackData;
@@ -394,34 +395,24 @@ async function parseHtml(htmlContent) {
       const title = titleId.text().trim();
       const num = extractNum(title);
       const genreTitle = $itemElement.find(genreSelector).first().text().trim();
-      const dmmMeta = await resolveDmmMetadata(num, {
+      const item = {
+        id: url,
+        type: "url",
         title,
+        num,
         posterPath: cover,
         backdropPath: cover,
+        releaseDate: "",
+        mediaType: "movie",
+        rating: "",
         genreTitle: genreTitle || sectionTitleText || "",
         duration,
         durationText,
         previewUrl: previewVideo,
-      });
-
-      const item = {
-        id: url,
-        type: "url",
-        title: dmmMeta.title || title,
-        num,
-        posterPath: dmmMeta.posterPath || cover,
-        backdropPath: dmmMeta.backdropPath || cover,
-        releaseDate: dmmMeta.releaseDate || "",
-        mediaType: "movie",
-        rating: dmmMeta.rating || "",
-        genreTitle: dmmMeta.genreTitle || genreTitle || sectionTitleText || "",
-        duration: dmmMeta.duration || duration,
-        durationText: dmmMeta.durationText || durationText,
-        previewUrl: dmmMeta.previewUrl || previewVideo,
         videoUrl: "",
         link: url,
         episode: 0,
-        description: dmmMeta.description || "",
+        description: "",
         playerType: "system",
         childItems: [],
       };
@@ -462,7 +453,7 @@ async function loadDetail(link) {
   }
 
   const ogImage = $("meta[property='og:image']").attr("content") || "";
-  const dmmMeta = await resolveDmmMetadata(num, {
+  const dmmMeta = await resolveDmmMetadata($("meta[property='og:title']").attr("content") || pageTitle, {
     title: $("meta[property='og:title']").attr("content") || pageTitle,
     posterPath: ogImage,
     backdropPath: ogImage,
